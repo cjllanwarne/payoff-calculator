@@ -133,3 +133,84 @@ flowchart TD
     P -->|Yes| Q[Generate Final Report]
     Q --> R[End]
 ``` 
+
+## Code Structure
+
+### Monthly Analysis Function
+
+The core calculation is encapsulated in a pure function that processes a single month:
+
+```python
+def process_month(
+    # Configuration (immutable)
+    config: PaymentConfig,
+    derived: DerivedConfig,
+    
+    # Current state (input)
+    loan_state: LoanState,
+    savings_state: SavingsState,
+) -> MonthlyResult:
+    """Process a single month of loan payments and savings.
+    
+    Args:
+        config: User-provided configuration including rates and preferences
+        derived: Pre-calculated values like minimum payments
+        loan_state: Current loan balance and payment history
+        savings_state: Current savings balance and history
+        
+    Returns:
+        MonthlyResult containing:
+        - New loan state
+        - New savings state
+        - Interest paid this month
+        - Principal paid this month
+        - Investment returns this month
+        - Taxes paid this month
+    """
+```
+
+#### Data Classes
+```python
+@dataclass
+class PaymentConfig:
+    loan_amount: float
+    loan_rate: float
+    loan_term_months: int
+    target_payment: float
+    investment_rate: float
+    tax_rate: float
+    investment_type: str  # 'CD' or 'STOCK'
+    use_savings_for_debt: bool
+
+@dataclass
+class DerivedConfig:
+    minimum_payment: float
+    
+@dataclass 
+class LoanState:
+    balance: float
+    total_interest_paid: float
+    total_principal_paid: float
+
+@dataclass
+class SavingsState:
+    balance: float
+    total_returns: float
+    total_taxes_paid: float
+
+@dataclass
+class MonthlyResult:
+    new_loan_state: LoanState
+    new_savings_state: SavingsState
+    interest_payment: float
+    principal_payment: float
+    investment_returns: float
+    tax_payment: float
+```
+
+This pure functional approach provides several benefits:
+1. Easy to test with different scenarios
+2. Clear separation between configuration and state
+3. Immutable inputs prevent side effects
+4. Explicit tracking of all money flows
+5. Simple to verify conservation of money
