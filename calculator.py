@@ -19,13 +19,13 @@ class PaymentConfig:
     def __init__(
         self,
         loan_amount: float,
-        loan_rate: float,  # as percentage
+        loan_rate: float,  # as decimal
         loan_term_months: int,
         target_payment: float,
         initial_savings: float,
         monthly_savings_payment: float,
-        investment_rate: float,  # as percentage
-        tax_rate: float,  # as percentage
+        investment_rate: float,  # as decimal
+        tax_rate: float,  # as decimal
         investment_type: str,
         excess_to_savings: bool
     ):
@@ -111,8 +111,12 @@ def process_month(
     savings_state: SavingsState
 ) -> MonthlyResult:
     """Process one month of payments and calculate new state."""
-    # Calculate this month's interest
-    monthly_interest = loan_state.balance * (config.loan_rate / 12)
+    # Calculate monthly rates using compound interest formula
+    monthly_loan_rate = (1 + config.loan_rate)**(1/12) - 1
+    monthly_investment_rate = (1 + config.investment_rate)**(1/12) - 1
+    
+    # Calculate this month's interest using the correct monthly rate
+    monthly_interest = loan_state.balance * monthly_loan_rate
     
     # Calculate payment amounts
     total_needed = loan_state.balance + monthly_interest
@@ -139,8 +143,8 @@ def process_month(
     if savings_state.balance > 0:
         if config.investment_type == 'CD':
             # For CDs:
-            # 1. Calculate return on initial balance
-            monthly_return = savings_state.balance * (config.investment_rate / 12)
+            # 1. Calculate return on initial balance using correct monthly rate
+            monthly_return = savings_state.balance * monthly_investment_rate
             # 2. Calculate tax on returns
             tax_payment = monthly_return * config.tax_rate
             # 3. Calculate savings payment (no tax on withdrawal)
@@ -165,9 +169,9 @@ def process_month(
                     tax_payment = savings_payment * config.tax_rate
                     principal_payment += savings_payment
             
-            # 2. Calculate return on remaining balance
+            # 2. Calculate return on remaining balance using correct monthly rate
             remaining_balance = savings_state.balance - savings_payment - tax_payment
-            monthly_return = remaining_balance * (config.investment_rate / 12)
+            monthly_return = remaining_balance * monthly_investment_rate
     
     # Update loan state
     new_loan_balance = loan_state.balance - principal_payment

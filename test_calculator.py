@@ -137,6 +137,10 @@ class TestProcessMonth(unittest.TestCase):
             total_pocket_money=0.0
         )
 
+    def monthly_rate(self, annual_rate: float) -> float:
+        """Calculate the correct monthly rate from an annual rate."""
+        return (1 + annual_rate)**(1/12) - 1
+
     def test_standard_payment(self):
         """Test a standard monthly payment with no savings usage."""
         config = self.standard_config
@@ -144,17 +148,19 @@ class TestProcessMonth(unittest.TestCase):
         
         result = process_month(config, self.initial_loan, self.initial_savings)
         
-        # First month's interest at 5% APR
-        expected_interest = 100000 * (0.05 / 12)  # $416.67
-        expected_principal = 600 - expected_interest  # $183.33
+        # First month's interest using compound interest formula
+        monthly_loan_rate = self.monthly_rate(0.05)
+        expected_interest = 100000 * monthly_loan_rate  # ~$407.41
+        expected_principal = 600 - expected_interest  # ~$192.59
         
         self.assertAlmostEqual(result.interest_payment, expected_interest, places=2)
         self.assertAlmostEqual(result.principal_payment, expected_principal, places=2)
         self.assertAlmostEqual(result.new_loan_state.balance, 100000 - expected_principal, places=2)
         
-        # Check savings growth (returns calculated on initial balance)
-        monthly_return = 10000 * (0.07 / 12)  # $58.33
-        monthly_tax = monthly_return * 0.25  # $14.58
+        # Check savings growth using compound interest formula
+        monthly_investment_rate = self.monthly_rate(0.07)
+        monthly_return = 10000 * monthly_investment_rate  # ~$55.83
+        monthly_tax = monthly_return * 0.25  # ~$13.96
         self.assertAlmostEqual(result.investment_returns, monthly_return, places=2)
         self.assertAlmostEqual(result.tax_payment, monthly_tax, places=2)
 
@@ -162,12 +168,13 @@ class TestProcessMonth(unittest.TestCase):
         """Test using additional payment from savings."""
         result = process_month(self.standard_config, self.initial_loan, self.initial_savings)
         
-        # First calculate interest
-        expected_interest = 100000 * (0.05 / 12)  # $416.67
+        # First calculate interest using compound interest formula
+        monthly_loan_rate = self.monthly_rate(0.05)
+        expected_interest = 100000 * monthly_loan_rate  # ~$407.41
         
         # Regular payment covers interest first
         target_interest = expected_interest
-        target_principal = 600 - expected_interest  # $183.33
+        target_principal = 600 - expected_interest  # ~$192.59
         
         # Additional payment from savings goes to principal
         savings_principal = 100  # Full savings amount goes to principal
@@ -175,15 +182,12 @@ class TestProcessMonth(unittest.TestCase):
         
         self.assertAlmostEqual(result.principal_payment, total_principal, places=2)
         
-        # For CDs:
-        # 1. Initial balance: 10000
-        # 2. Monthly return: 10000 * (0.07 / 12) = 58.33
-        # 3. Tax on return: 58.33 * 0.25 = 14.58
-        # 4. Withdrawal: 100 (no tax on withdrawal for CDs)
-        # Final balance: 10000 + 58.33 - 14.58 - 100 = 9943.75
-        self.assertAlmostEqual(result.new_savings_state.balance, 
-                             10000 + (10000 * 0.07 / 12) - (10000 * 0.07 / 12 * 0.25) - 100,
-                             places=2)
+        # For CDs using compound interest formula:
+        monthly_investment_rate = self.monthly_rate(0.07)
+        monthly_return = 10000 * monthly_investment_rate  # ~$55.83
+        monthly_tax = monthly_return * 0.25  # ~$13.96
+        expected_balance = 10000 + monthly_return - monthly_tax - 100
+        self.assertAlmostEqual(result.new_savings_state.balance, expected_balance, places=2)
 
     def test_stock_investment(self):
         """Test with stock investment type (taxes only on withdrawal)."""
@@ -192,11 +196,12 @@ class TestProcessMonth(unittest.TestCase):
         
         result = process_month(config, self.initial_loan, self.initial_savings)
         
-        # Monthly return calculated on balance after withdrawal
+        # Monthly return calculated on balance after withdrawal using compound interest formula
         withdrawal = 100  # Monthly savings payment
         tax = withdrawal * 0.25  # 25% tax on withdrawal
         remaining_balance = 10000 - withdrawal - tax
-        monthly_return = remaining_balance * (0.07 / 12)  # Return on remaining balance
+        monthly_investment_rate = self.monthly_rate(0.07)
+        monthly_return = remaining_balance * monthly_investment_rate
         
         self.assertAlmostEqual(result.investment_returns, monthly_return, places=2)
         self.assertAlmostEqual(result.new_savings_state.balance, 
@@ -295,7 +300,8 @@ class TestProcessMonth(unittest.TestCase):
         result = process_month(self.standard_config, paid_loan, initial_savings)
         
         # All target payment should go to savings
-        monthly_return = 20000 * (0.07 / 12)  # Return on initial balance
+        monthly_rate = (1 + 0.07)**(1/12) - 1  # 7% APR compounded monthly
+        monthly_return = 20000 * monthly_rate  # Return on initial balance
         tax = monthly_return * 0.25  # CD tax on returns
         expected_balance = (20000 + monthly_return - tax + 
                           self.standard_config.target_payment)
@@ -334,7 +340,7 @@ class TestProcessMonth(unittest.TestCase):
 
     def test_small_numbers_precision(self):
         """Test handling of very small numbers for returns and taxes."""
-        # Use a paid off loan so all target payment goes to savings
+        # Use a paid off loan and tiny savings balance
         paid_loan = LoanState(
             balance=0.0,
             total_interest_paid=0.0,
@@ -342,7 +348,7 @@ class TestProcessMonth(unittest.TestCase):
         )
         
         tiny_savings = SavingsState(
-            balance=0.01,  # Very small balance
+            balance=0.01,
             total_returns=0.0,
             total_taxes_paid=0.0,
             total_pocket_money=0.0
@@ -350,9 +356,10 @@ class TestProcessMonth(unittest.TestCase):
         
         result = process_month(self.standard_config, paid_loan, tiny_savings)
         
-        # Verify no precision loss
-        monthly_return = 0.01 * (0.07 / 12)  # Return on initial balance
-        tax = monthly_return * 0.25  # Tax on returns
+        # Verify no precision loss using compound interest formula
+        monthly_investment_rate = self.monthly_rate(0.07)
+        monthly_return = 0.01 * monthly_investment_rate
+        tax = monthly_return * 0.25
         expected_balance = 0.01 + monthly_return - tax + self.standard_config.target_payment
         
         self.assertAlmostEqual(result.new_savings_state.balance, expected_balance, places=8)
@@ -375,14 +382,11 @@ class TestProcessMonth(unittest.TestCase):
         
         result = process_month(config, self.initial_loan, initial_savings)
         
-        # For CDs:
-        # 1. Calculate returns on initial balance
-        monthly_return = 1000.0 * (0.07 / 12)
-        # 2. Calculate tax on returns
+        # For CDs using compound interest formula:
+        monthly_investment_rate = self.monthly_rate(0.07)
+        monthly_return = 1000.0 * monthly_investment_rate
         tax = monthly_return * 0.25
-        # 3. Make withdrawal (no tax for CDs)
         withdrawal = 100.0
-        # 4. Final balance
         expected_balance = 1000.0 + monthly_return - tax - withdrawal
         
         self.assertAlmostEqual(result.new_savings_state.balance, expected_balance, places=2)
@@ -398,9 +402,10 @@ class TestProcessMonth(unittest.TestCase):
         
         result = process_month(config, self.initial_loan, self.initial_savings)
         
-        # First month's interest at 5% APR
-        expected_interest = 100000 * (0.05 / 12)  # $416.67
-        expected_principal = 1000 - expected_interest  # $583.33
+        # First month's interest using compound interest formula
+        monthly_loan_rate = self.monthly_rate(0.05)
+        expected_interest = 100000 * monthly_loan_rate  # ~$407.41
+        expected_principal = 1000 - expected_interest  # ~$592.59
         
         self.assertAlmostEqual(result.interest_payment, expected_interest, places=2)
         self.assertAlmostEqual(result.principal_payment, expected_principal, places=2)
@@ -415,22 +420,21 @@ class TestProcessMonth(unittest.TestCase):
         
         result = process_month(config, self.initial_loan, self.initial_savings)
         
-        # First month's interest at 5% APR
-        expected_interest = 100000 * (0.05 / 12)  # $416.67
-        expected_principal = config.minimum_payment - expected_interest  # $120.15
+        # First month's interest using compound interest formula
+        monthly_loan_rate = self.monthly_rate(0.05)
+        expected_interest = 100000 * monthly_loan_rate  # ~$407.41
+        expected_principal = config.minimum_payment - expected_interest  # ~$129.41
         expected_excess = config.target_payment - config.minimum_payment  # $463.18
         
         self.assertAlmostEqual(result.interest_payment, expected_interest, places=2)
         self.assertAlmostEqual(result.principal_payment, expected_principal, places=2)
         self.assertAlmostEqual(result.savings_contribution, expected_excess, places=2)
         
-        # Verify savings balance includes the excess payment
-        expected_savings = (
-            10000 +  # Initial balance
-            (10000 * 0.07 / 12) -  # Returns
-            (10000 * 0.07 / 12 * 0.25) +  # Tax on returns
-            expected_excess  # Excess payment
-        )
+        # Verify savings balance includes the excess payment using compound interest formula
+        monthly_investment_rate = self.monthly_rate(0.07)
+        monthly_return = 10000 * monthly_investment_rate
+        monthly_tax = monthly_return * 0.25
+        expected_savings = 10000 + monthly_return - monthly_tax + expected_excess
         self.assertAlmostEqual(result.new_savings_state.balance, expected_savings, places=2)
 
     def test_excess_to_savings_with_savings_payment(self):
@@ -443,21 +447,20 @@ class TestProcessMonth(unittest.TestCase):
         result = process_month(config, self.initial_loan, self.initial_savings)
         
         # When excess goes to savings, monthly_savings_payment should not be used
-        expected_interest = 100000 * (0.05 / 12)  # $416.67
-        expected_principal = config.minimum_payment - expected_interest  # $120.15
+        monthly_loan_rate = self.monthly_rate(0.05)
+        expected_interest = 100000 * monthly_loan_rate  # ~$407.41
+        expected_principal = config.minimum_payment - expected_interest  # ~$129.41
         expected_excess = config.target_payment - config.minimum_payment  # $463.18
         
         self.assertAlmostEqual(result.interest_payment, expected_interest, places=2)
         self.assertAlmostEqual(result.principal_payment, expected_principal, places=2)
         self.assertAlmostEqual(result.savings_contribution, expected_excess, places=2)
         
-        # Verify no additional payment was taken from savings
-        expected_savings = (
-            10000 +  # Initial balance
-            (10000 * 0.07 / 12) -  # Returns
-            (10000 * 0.07 / 12 * 0.25) +  # Tax on returns
-            expected_excess  # Excess payment
-        )
+        # Verify no additional payment was taken from savings using compound interest formula
+        monthly_investment_rate = self.monthly_rate(0.07)
+        monthly_return = 10000 * monthly_investment_rate
+        monthly_tax = monthly_return * 0.25
+        expected_savings = 10000 + monthly_return - monthly_tax + expected_excess
         self.assertAlmostEqual(result.new_savings_state.balance, expected_savings, places=2)
 
 if __name__ == '__main__':
