@@ -30,10 +30,6 @@ class PaymentConfig:
         excess_to_savings: bool
     ):
         """Create a PaymentConfig instance from simulation parameters."""
-        # Convert percentage rates to decimals
-        loan_rate = loan_rate / 100
-        inv_rate = investment_rate / 100
-        tax_rate_decimal = tax_rate / 100
         
         # Calculate minimum payment
         min_payment = calculate_minimum_payment(loan_amount, loan_rate, loan_term_months)
@@ -44,8 +40,8 @@ class PaymentConfig:
         self.target_payment = target_payment
         self.initial_savings = initial_savings
         self.minimum_payment = min_payment
-        self.investment_rate = inv_rate
-        self.tax_rate = tax_rate_decimal
+        self.investment_rate = investment_rate
+        self.tax_rate = tax_rate
         self.investment_type = investment_type
         self.monthly_savings_payment = monthly_savings_payment
         self.excess_to_savings = excess_to_savings
