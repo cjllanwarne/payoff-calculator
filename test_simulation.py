@@ -77,8 +77,8 @@ class TestSimulation(unittest.TestCase):
         
         result = run_simulation(config=config, lump_sum=0)
         
-        # Test that loan is paid off in exactly 12 months
-        self.assertEqual(len(result.loan_balance), 12)
+        # Test that loan is paid off in exactly 12 months (nb: one extra entry for the initial conditions)
+        self.assertEqual(len(result.loan_balance), 13)
         self.assertLess(result.loan_balance[-1], 1)
         
         # Test that savings grew at expected rate (no withdrawals)
@@ -112,16 +112,16 @@ class TestSimulation(unittest.TestCase):
         result = run_simulation(config=config, lump_sum=0)
         
         # Test length of simulation
-        self.assertEqual(len(result.loan_balance), 360)
+        self.assertEqual(len(result.loan_balance), 361) # 360 months + 1 entry for initial conditions
         
         # Test that savings grew substantially
         self.assertGreater(result.savings_balance[-1], 100000)  # Should have grown significantly
-        self.assertGreater(result.total_pocket_money, 0)  # Should have some pocket money
+        self.assertEqual(result.total_pocket_money, 0)  # No pocket money, target is always above minimum
         
     def test_edge_case_zero_interest(self):
         """Test edge case with 0% interest rates."""
         config = PaymentConfig(
-            loan_amount=10000,
+            loan_amount=12000,
             loan_rate=0.0,
             loan_term_months=12,
             target_payment=1000,
@@ -136,7 +136,8 @@ class TestSimulation(unittest.TestCase):
         result = run_simulation(config=config, lump_sum=0)
         
         # Test that loan decreases linearly
-        self.assertAlmostEqual(result.loan_balance[6], 5000, 2)  # Half paid at halfway point
+        for i in range(0, 12):
+            self.assertAlmostEqual(result.loan_balance[i], 12000 - (1000 * i), 2)
         self.assertAlmostEqual(sum(result.interest_payments), 0, 2)  # No interest paid
         
     def test_edge_case_immediate_payoff(self):
@@ -146,7 +147,7 @@ class TestSimulation(unittest.TestCase):
             loan_rate=0.05,
             loan_term_months=12,
             target_payment=1000,
-            initial_savings=20000,
+            initial_savings=10000,
             monthly_savings_payment=0,
             investment_rate=0.03,
             tax_rate=0.25,
@@ -157,12 +158,17 @@ class TestSimulation(unittest.TestCase):
         result = run_simulation(config=config, lump_sum=10000)
         
         # Test immediate payoff
-        self.assertEqual(len(result.loan_balance), 1)  # Only initial state
-        self.assertAlmostEqual(result.loan_balance[0], 0, 2)  # Loan fully paid
-        self.assertAlmostEqual(result.savings_balance[0], 10000, 2)  # Remaining savings
+        self.assertEqual(len(result.loan_balance), 13)  # Continue even after payoff, 12 months + 1 for initial conditions
+        self.assertAlmostEqual(result.loan_balance[0], 0, 2)  # Immediately paid off
+        self.assertAlmostEqual(result.savings_balance[0], 0, 2)  # Immediately no savings left
 
-        # Savings after 12 months
-        self.assertAlmostEqual(result.savings_balance[12], 10000 + 10000 * 0.03 / 12, 2)
+        # Savings after 1 month:
+        self.assertAlmostEqual(result.savings_balance[1], 1000, 2)
+        month_1_interest = 1000 * 0.03 / 12
+        month_1_tax = month_1_interest * 0.25
+        month_1_contribution = 1000
+        self.assertAlmostEqual(result.savings_balance[2], 1000 + month_1_interest - month_1_tax + month_1_contribution, 2)
+
 
 if __name__ == '__main__':
     unittest.main() 

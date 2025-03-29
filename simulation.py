@@ -42,15 +42,16 @@ def run_simulation(
         total_taxes_paid=0.0,
         total_pocket_money=0.0
     )
-    
-    # Apply initial lump sum if available
+
+    # Apply initial lump sum if available.
     if lump_sum > 0 and config.initial_savings > 0:
         actual_lump_sum = min(lump_sum, config.initial_savings, config.loan_amount)
         loan_state.balance -= actual_lump_sum
         loan_state.total_principal_paid += actual_lump_sum
         savings_state.balance -= actual_lump_sum
     
-    # Initialize result arrays
+    # Initialize result arrays.
+    # The first value is either our "starting conditions" or includes the "lump sum payment"
     result = SimulationResult(
         loan_balance=[loan_state.balance],
         savings_balance=[savings_state.balance],
@@ -64,7 +65,9 @@ def run_simulation(
     )
     
     # Run month-by-month simulation
-    for _ in range(1 if lump_sum > 0 else 0, config.loan_term_months):
+    # NB the fence post problem. We start with "initial conditions" but still need to process the full number of months
+    # so the final array is one entry longer than the number of months
+    for _ in range(0, config.loan_term_months):
         monthly_result = process_month(config, loan_state, savings_state)
         
         # Update state
