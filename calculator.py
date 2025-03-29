@@ -1,21 +1,55 @@
 from dataclasses import dataclass
 from typing import Optional
 
+
 @dataclass
 class PaymentConfig:
     loan_amount: float
     loan_rate: float  # Annual rate as decimal (e.g. 0.05 for 5%)
     loan_term_months: int
     target_payment: float
+    initial_savings: float
     minimum_payment: float  # Added to track pocket money
     investment_rate: float  # Annual rate as decimal
     tax_rate: float  # Decimal (e.g. 0.25 for 25%)
     investment_type: str  # 'CD' or 'STOCK'
     monthly_savings_payment: float  # Amount to use from savings each month
+    excess_to_savings: bool = False  # If True, excess goes to savings. If False, to principal.
 
-@dataclass
-class DerivedConfig:
-    minimum_payment: float
+    def __init__(
+        self,
+        loan_amount: float,
+        loan_rate: float,  # as percentage
+        loan_term_months: int,
+        target_payment: float,
+        initial_savings: float,
+        monthly_savings_payment: float,
+        investment_rate: float,  # as percentage
+        tax_rate: float,  # as percentage
+        investment_type: str,
+        excess_to_savings: bool
+    ):
+        """Create a PaymentConfig instance from simulation parameters."""
+        # Convert percentage rates to decimals
+        loan_rate = loan_rate / 100
+        inv_rate = investment_rate / 100
+        tax_rate_decimal = tax_rate / 100
+        
+        # Calculate minimum payment
+        min_payment = calculate_minimum_payment(loan_amount, loan_rate, loan_term_months)
+        
+        self.loan_amount = loan_amount
+        self.loan_rate = loan_rate
+        self.loan_term_months = loan_term_months
+        self.target_payment = target_payment
+        self.initial_savings = initial_savings
+        self.minimum_payment = min_payment
+        self.investment_rate = inv_rate
+        self.tax_rate = tax_rate_decimal
+        self.investment_type = investment_type
+        self.monthly_savings_payment = monthly_savings_payment
+        self.excess_to_savings = excess_to_savings
+
 
 @dataclass 
 class LoanState:
@@ -77,128 +111,106 @@ def calculate_minimum_payment(amount: float, rate: float, months: int) -> float:
 
 def process_month(
     config: PaymentConfig,
-    derived: DerivedConfig,
     loan_state: LoanState,
-    savings_state: SavingsState,
+    savings_state: SavingsState
 ) -> MonthlyResult:
-    """Process a single month of loan payments and savings.
+    """Process one month of payments and calculate new state."""
+    # Calculate this month's interest
+    monthly_interest = loan_state.balance * (config.loan_rate / 12)
     
-    The function follows these steps:
-    1. Calculate this month's interest
-    2. Determine payment from regular income (up to target payment)
-    3. Calculate investment returns and taxes (for CDs)
-    4. If needed and available, use savings to pay more
-    5. Calculate investment returns (for stocks)
-    6. If loan is paid off, invest remaining target payment
-    """
-    # Monthly rates
-    monthly_loan_rate = config.loan_rate / 12
-    monthly_investment_rate = config.investment_rate / 12
+    # Calculate payment amounts
+    total_needed = loan_state.balance + monthly_interest
+    payment_from_income = min(config.target_payment, total_needed)
     
-    # Start with current state
-    new_loan = LoanState(
-        balance=loan_state.balance,
-        total_interest_paid=loan_state.total_interest_paid,
-        total_principal_paid=loan_state.total_principal_paid
-    )
-    new_savings = SavingsState(
-        balance=savings_state.balance,
-        total_returns=savings_state.total_returns,
-        total_taxes_paid=savings_state.total_taxes_paid,
-        total_pocket_money=savings_state.total_pocket_money
-    )
+    # Handle excess payment based on configuration
+    excess_payment = max(0, config.target_payment - config.minimum_payment)
+    savings_contribution = 0.0
     
-    # Calculate this month's loan interest
-    interest_this_month = new_loan.balance * monthly_loan_rate
+    if config.excess_to_savings and excess_payment > 0 and loan_state.balance > 0:
+        # Route excess to savings instead of principal
+        payment_from_income = min(config.minimum_payment, payment_from_income)
+        savings_contribution = excess_payment
     
-    # First, allocate target payment to interest and principal
-    total_needed = new_loan.balance + interest_this_month
-    target_to_loan = min(config.target_payment, total_needed)
-    target_interest = min(interest_this_month, target_to_loan)
-    target_principal = target_to_loan - target_interest
-    target_to_savings = config.target_payment - target_to_loan
+    # Calculate principal and interest portions
+    interest_payment = min(monthly_interest, payment_from_income)
+    principal_payment = payment_from_income - interest_payment
     
-    # Calculate investment returns for CDs (on initial balance)
-    investment_returns = 0.0
-    investment_tax = 0.0
-    if new_savings.balance > 0 and config.investment_type == 'CD':
-        # Calculate returns on initial balance
-        investment_returns = new_savings.balance * monthly_investment_rate
-        new_savings.total_returns += investment_returns
-        # For CDs, tax is applied to returns immediately
-        investment_tax = investment_returns * config.tax_rate
-        new_savings.total_taxes_paid += investment_tax
+    # Handle investment returns and taxes
+    monthly_return = 0.0
+    tax_payment = 0.0
+    savings_payment = 0.0
     
-    # Then, try to use additional payment from savings if available
-    from_savings = 0.0
-    savings_tax = 0.0
-    if (new_loan.balance > 0 and 
-        config.monthly_savings_payment > 0 and 
-        new_savings.balance > 0):
-        
-        available_savings = new_savings.balance
-        if config.investment_type == 'STOCK':
-            # Only stocks are taxed on withdrawal
-            available_savings = available_savings / (1 + config.tax_rate)
+    if savings_state.balance > 0:
+        if config.investment_type == 'CD':
+            # For CDs:
+            # 1. Calculate return on initial balance
+            monthly_return = savings_state.balance * (config.investment_rate / 12)
+            # 2. Calculate tax on returns
+            tax_payment = monthly_return * config.tax_rate
+            # 3. Calculate savings payment (no tax on withdrawal)
+            if loan_state.balance > 0 and not config.excess_to_savings:
+                savings_payment = min(
+                    config.monthly_savings_payment,
+                    savings_state.balance,
+                    loan_state.balance - principal_payment
+                )
+                if savings_payment > 0:
+                    principal_payment += savings_payment
+        else:  # STOCK
+            # For stocks:
+            # 1. Calculate withdrawal and tax
+            if loan_state.balance > 0 and not config.excess_to_savings:
+                savings_payment = min(
+                    config.monthly_savings_payment,
+                    savings_state.balance,
+                    loan_state.balance - principal_payment
+                )
+                if savings_payment > 0:
+                    tax_payment = savings_payment * config.tax_rate
+                    principal_payment += savings_payment
             
-        # Use savings up to the monthly savings payment amount or what's needed
-        remaining_needed = total_needed - target_to_loan
-        from_savings = min(
-            config.monthly_savings_payment,
-            available_savings,
-            remaining_needed if remaining_needed > 0 else 0.0
-        )
-        
-        if from_savings > 0:
-            if config.investment_type == 'STOCK':
-                # Only stocks are taxed on withdrawal
-                savings_tax = from_savings * config.tax_rate
-                new_savings.total_taxes_paid += savings_tax
-                new_savings.balance -= (from_savings + savings_tax)
-            else:
-                # CDs are not taxed on withdrawal
-                new_savings.balance -= from_savings
-    
-    # Apply extra payment to loan
-    if from_savings > 0:
-        extra_interest = min(
-            interest_this_month - target_interest,
-            from_savings
-        )
-        extra_principal = from_savings - extra_interest
-        
-        target_interest += extra_interest
-        target_principal += extra_principal
-    
-    # Calculate pocket money (difference between minimum and actual payments)
-    actual_payment = target_interest + target_principal
-    pocket_money = max(0, config.minimum_payment - actual_payment)
-    new_savings.total_pocket_money += pocket_money
+            # 2. Calculate return on remaining balance
+            remaining_balance = savings_state.balance - savings_payment - tax_payment
+            monthly_return = remaining_balance * (config.investment_rate / 12)
     
     # Update loan state
-    new_loan.total_interest_paid += target_interest
-    new_loan.total_principal_paid += target_principal
-    new_loan.balance = max(0, new_loan.balance - target_principal)
+    new_loan_balance = loan_state.balance - principal_payment
+    new_loan_state = LoanState(
+        balance=new_loan_balance,
+        total_interest_paid=loan_state.total_interest_paid + interest_payment,
+        total_principal_paid=loan_state.total_principal_paid + principal_payment
+    )
     
-    # Calculate investment returns for stocks (on remaining balance)
-    if new_savings.balance > 0 and config.investment_type == 'STOCK':
-        investment_returns = new_savings.balance * monthly_investment_rate
-        new_savings.total_returns += investment_returns
+    # Calculate pocket money (if paying less than minimum)
+    pocket_money = max(0, config.minimum_payment - config.target_payment)
     
-    # If loan is paid off, invest the remaining target payment
-    if new_loan.balance == 0:
-        target_to_savings = config.target_payment - actual_payment
+    # If loan is paid off, contribute remaining target payment to savings
+    if new_loan_balance == 0 and payment_from_income < config.target_payment:
+        savings_contribution = config.target_payment - payment_from_income
     
-    # Add investment returns and savings contribution last
-    new_savings.balance += investment_returns - investment_tax + target_to_savings
+    # Update savings state
+    new_savings_balance = (
+        savings_state.balance +
+        monthly_return -
+        tax_payment -
+        savings_payment +
+        savings_contribution
+    )
+    
+    new_savings_state = SavingsState(
+        balance=new_savings_balance,
+        total_returns=savings_state.total_returns + monthly_return,
+        total_taxes_paid=savings_state.total_taxes_paid + tax_payment,
+        total_pocket_money=savings_state.total_pocket_money + pocket_money
+    )
     
     return MonthlyResult(
-        new_loan_state=new_loan,
-        new_savings_state=new_savings,
-        interest_payment=target_interest,
-        principal_payment=target_principal,
-        investment_returns=investment_returns,
-        tax_payment=investment_tax + savings_tax,
+        new_loan_state=new_loan_state,
+        new_savings_state=new_savings_state,
+        interest_payment=interest_payment,
+        principal_payment=principal_payment,
+        investment_returns=monthly_return,
+        tax_payment=tax_payment,
         pocket_money=pocket_money,
-        savings_contribution=target_to_savings
+        savings_contribution=savings_contribution
     ) 

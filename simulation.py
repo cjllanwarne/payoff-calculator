@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Tuple
 from calculator import (
-    PaymentConfig, DerivedConfig, LoanState, SavingsState, MonthlyResult,
-    calculate_minimum_payment, process_month
+    PaymentConfig, LoanState, SavingsState, process_month
 )
 
 @dataclass
@@ -17,60 +16,36 @@ class SimulationResult:
     pocket_money: List[float]
     total_pocket_money: float
 
+
 def run_simulation(
-    debt_amount: float,
-    debt_interest: float,  # as percentage
-    loan_term_months: int,
-    target_payment: float,
-    initial_savings: float,
-    lump_sum: float,
-    monthly_savings_payment: float,
-    investment_rate: float,  # as percentage
-    tax_rate: float,  # as percentage
-    is_cd: bool,
+    config: PaymentConfig,
+    lump_sum: float = 0.0
 ) -> SimulationResult:
-    """Run the full debt vs investment simulation."""
+    """Run the full debt vs investment simulation.
     
-    # Convert percentage rates to decimals
-    debt_rate = debt_interest / 100
-    inv_rate = investment_rate / 100
-    tax_rate_decimal = tax_rate / 100
-    
-    # Calculate minimum payment
-    min_payment = calculate_minimum_payment(debt_amount, debt_rate, loan_term_months)
-    
-    # Initialize configuration
-    config = PaymentConfig(
-        loan_amount=debt_amount,
-        loan_rate=debt_rate,
-        loan_term_months=loan_term_months,
-        target_payment=target_payment,
-        minimum_payment=min_payment,
-        investment_rate=inv_rate,
-        tax_rate=tax_rate_decimal,
-        investment_type='CD' if is_cd else 'STOCK',
-        monthly_savings_payment=monthly_savings_payment
-    )
-    
-    derived = DerivedConfig(minimum_payment=min_payment)
+    Args:
+        config: PaymentConfig instance containing all payment and investment parameters
+        lump_sum: Optional initial lump sum payment from savings
+    """
     
     # Initialize state
     loan_state = LoanState(
-        balance=debt_amount,
+        balance=config.loan_amount,
         total_interest_paid=0.0,
         total_principal_paid=0.0
     )
     
+    # For initial savings, we need to look at the config
     savings_state = SavingsState(
-        balance=initial_savings,
+        balance=config.initial_savings,
         total_returns=0.0,
         total_taxes_paid=0.0,
         total_pocket_money=0.0
     )
     
     # Apply initial lump sum if available
-    if lump_sum > 0 and initial_savings > 0:
-        actual_lump_sum = min(lump_sum, initial_savings, debt_amount)
+    if lump_sum > 0 and config.initial_savings > 0:
+        actual_lump_sum = min(lump_sum, config.initial_savings, config.loan_amount)
         loan_state.balance -= actual_lump_sum
         loan_state.total_principal_paid += actual_lump_sum
         savings_state.balance -= actual_lump_sum
@@ -89,8 +64,8 @@ def run_simulation(
     )
     
     # Run month-by-month simulation
-    for _ in range(1 if lump_sum > 0 else 0, loan_term_months):
-        monthly_result = process_month(config, derived, loan_state, savings_state)
+    for _ in range(1 if lump_sum > 0 else 0, config.loan_term_months):
+        monthly_result = process_month(config, loan_state, savings_state)
         
         # Update state
         loan_state = monthly_result.new_loan_state

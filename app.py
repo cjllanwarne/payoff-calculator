@@ -6,8 +6,8 @@ from typing import Tuple, List
 import json
 import os
 from datetime import datetime
-from simulation import run_simulation, SimulationResult
-from calculator import calculate_minimum_payment
+from simulation import run_simulation
+from calculator import calculate_minimum_payment, PaymentConfig
 
 st.set_page_config(
     page_title="Debt Payoff vs Investment Calculator",
@@ -25,9 +25,10 @@ DEFAULTS = {
     'lump_sum_month': 0,
     'monthly_savings_payment': 0.0,  # New default for monthly payment from savings
     'investment_rate': 7.0,
-    'investment_type': "CD (taxed annually)",
+    'investment_type': "CD",
     'tax_rate': 25.0,
-    'config_name': 'default'  # Add default configuration name
+    'config_name': 'default',  # Add default configuration name
+    'excess_to_savings': True  # Add default for excess_to_savings
 }
 
 for key, value in DEFAULTS.items():
@@ -48,7 +49,8 @@ def save_config():
         'investment_rate': st.session_state.investment_rate,
         'investment_type': st.session_state.investment_type,
         'tax_rate': st.session_state.tax_rate,
-        'config_name': st.session_state.config_name  # Save the configuration name
+        'config_name': st.session_state.config_name,
+        'excess_to_savings': st.session_state.excess_to_savings
     }
     
     # Create configs directory if it doesn't exist
@@ -187,6 +189,13 @@ with col1:
         step=100.0,
         key='target_payment'
     )
+    
+    # Add excess to savings checkbox in loan details section
+    st.checkbox(
+        "Route Excess to Savings",
+        key='excess_to_savings',
+        help="If checked, any payment above minimum goes to savings. If unchecked, it goes to loan principal."
+    )
 
 with col2:
     st.subheader("Investment Details")
@@ -217,12 +226,22 @@ with col2:
         key='investment_rate'
     )
     
-    st.radio(
+    # Map display values to storage values
+    investment_type_map = {
+        "CD (taxed annually)": "CD",
+        "Stocks (taxed at withdrawal)": "STOCK"
+    }
+    
+    # Display radio with descriptions but store simple values
+    selected_display = st.radio(
         "Investment Type",
-        ["CD (taxed annually)", "Stocks (taxed at withdrawal)"],
-        key='investment_type'
+        list(investment_type_map.keys()),
+        index=0 if st.session_state.investment_type == "CD" else 1
     )
-    is_cd = st.session_state.investment_type == "CD (taxed annually)"
+    # Update session state with the mapped value
+    st.session_state.investment_type = investment_type_map[selected_display]
+    
+    is_cd = st.session_state.investment_type == "CD"
     
     tax_label = "Annual Investment Tax Rate (%)" if is_cd else "Capital Gains Tax Rate (%)"
     st.number_input(
@@ -234,17 +253,22 @@ with col2:
     )
 
 # Run analysis
-result = run_simulation(
-    debt_amount=st.session_state.debt_amount,
-    debt_interest=st.session_state.debt_interest,
+config = PaymentConfig(
+    loan_amount=st.session_state.debt_amount,
+    loan_rate=st.session_state.debt_interest,
     loan_term_months=months,
     target_payment=st.session_state.target_payment,
     initial_savings=st.session_state.initial_savings,
-    lump_sum=st.session_state.lump_sum,
     monthly_savings_payment=st.session_state.monthly_savings_payment,
     investment_rate=st.session_state.investment_rate,
     tax_rate=st.session_state.tax_rate,
-    is_cd=is_cd
+    investment_type=st.session_state.investment_type,
+    excess_to_savings=st.session_state.excess_to_savings
+)
+
+result = run_simulation(
+    config=config,
+    lump_sum=st.session_state.lump_sum
 )
 
 # Create plots
